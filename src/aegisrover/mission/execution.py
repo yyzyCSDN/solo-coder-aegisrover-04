@@ -132,6 +132,19 @@ class WaypointRunner:
             return 1.0
         return self.index / len(self.waypoints)
 
+    def suspend(self) -> dict:
+        """Checkpoint the visitation progress so a preemption keeps it."""
+        return {'index': self.index, 'skipped': list(self.skipped)}
+
+    def restore(self, state: dict) -> None:
+        """Re-instate progress captured by :meth:`suspend`."""
+        index = int(state['index'])
+        if not 0 <= index <= len(self.waypoints):
+            raise ExecutionError('checkpoint index out of range')
+        skipped = list(state['skipped'])
+        self.index = index
+        self.skipped = skipped
+
 
 @dataclass
 class MissionExecution:
@@ -185,6 +198,28 @@ class MissionExecution:
         self.state = 'running'
         self._log('resume', {})
         return self.state
+
+    def preemptible(self) -> bool:
+        """A waypoint tick is a safe point: progress only moves on visitations."""
+        return self.state == 'running'
+
+    def suspend(self) -> dict:
+        """Yield the executor at a safe point and checkpoint the runner.
+
+        The mission moves to ``paused``; the caller is expected to re-queue it
+        with its lifecycle service. Visited waypoints are retained, so resume
+        never re-visits them.
+        """
+        if self.state != 'running':
+            raise ExecutionError(f'cannot suspend from {self.state}')
+        self.state = 'paused'
+        checkpoint = {'runner': self.runner.suspend()}
+        self._log('suspend', {'progress': round(self.runner.progress(), 6)})
+        return checkpoint
+
+    def restore(self, checkpoint: dict) -> None:
+        self.runner.restore(checkpoint['runner'])
+        self._log('restore', {'progress': round(self.runner.progress(), 6)})
 
     def complete(self) -> str:
         if self.state in ('completed', 'aborted'):

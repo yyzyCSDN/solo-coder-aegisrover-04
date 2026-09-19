@@ -32,6 +32,10 @@ TRANSITIONS: dict[str, dict[str, str]] = {
     'start': {'assigned': 'running'},
     'pause': {'running': 'paused'},
     'resume': {'paused': 'running'},
+    # Preemption: a running mission yields the executor at a safe point and goes
+    # back to the queue (its checkpoint is held separately). Unlike a cancel,
+    # the mission is still dispatchable and keeps its priority and seniority.
+    'requeue': {'running': 'queued'},
     'complete': {'running': 'completed'},
     'fail': {'running': 'failed', 'paused': 'failed'},
     'cancel': {'draft': 'cancelled', 'queued': 'cancelled', 'assigned': 'cancelled',
@@ -164,6 +168,8 @@ class MissionService:
                 raise MissionError('assign needs an assignee')
             updates['assigned_to'] = assignee
         if command == 'release':
+            updates['assigned_to'] = None
+        if command == 'requeue':
             updates['assigned_to'] = None
         if command == 'retry':
             updates['retries'] = mission.retries + 1
